@@ -142,7 +142,10 @@ func (t *TV) handleDryRun(btn button) error {
 
 func (t *TV) connect(ctx context.Context) error {
 	if t.connected {
-		return nil
+		if t.client != nil && t.client.IsConnected() {
+			return nil
+		}
+		t.disconnect()
 	}
 
 	if err := t.ensureHost(ctx); err != nil {
@@ -310,44 +313,65 @@ func (t *TV) keyHandler(ctx context.Context, btn button) error {
 		return err
 	}
 	if err := t.inputCtl.ConnectInput(ctx); err != nil {
+		t.disconnect()
 		return fmt.Errorf("connect input socket: %w", err)
 	}
 
-	var err error
-	switch btn {
-	case UP:
-		err = t.inputCtl.Up()
-	case DOWN:
-		err = t.inputCtl.Down()
-	case LEFT:
-		err = t.inputCtl.Left()
-	case RIGHT:
-		err = t.inputCtl.Right()
-	case OK:
-		err = t.inputCtl.OK()
-	case BACK:
-		err = t.inputCtl.Back()
-	case HOME:
-		err = t.inputCtl.Home()
-	case CHUP:
-		err = t.inputCtl.ChannelUp()
-	case CHDOWN:
-		err = t.inputCtl.ChannelDown()
-	case VOLDOWN:
-		err = t.inputCtl.VolumeDown()
-	case VOLUP:
-		err = t.inputCtl.VolumeUp()
-	case INFO:
-		err = t.inputCtl.Info()
-	default:
-		return fmt.Errorf("unknown button: %s", btn)
+	err := t.sendInputButton(btn)
+	if err == nil {
+		return nil
 	}
 
-	if err != nil {
+	log.Printf("input key %s failed (%v), reconnecting...", btn, err)
+	if t.client != nil && t.client.IsConnected() {
+		_ = t.inputCtl.DisconnectInput()
+	} else {
+		t.disconnect()
+		if connErr := t.connect(ctx); connErr != nil {
+			return fmt.Errorf("send key %s: %w", btn, connErr)
+		}
+	}
+
+	if connErr := t.inputCtl.ConnectInput(ctx); connErr != nil {
+		t.disconnect()
+		return fmt.Errorf("connect input socket: %w", connErr)
+	}
+	if err := t.sendInputButton(btn); err != nil {
 		t.disconnect()
 		return fmt.Errorf("send key %s: %w", btn, err)
 	}
 	return nil
+}
+
+func (t *TV) sendInputButton(btn button) error {
+	switch btn {
+	case UP:
+		return t.inputCtl.Up()
+	case DOWN:
+		return t.inputCtl.Down()
+	case LEFT:
+		return t.inputCtl.Left()
+	case RIGHT:
+		return t.inputCtl.Right()
+	case OK:
+		return t.inputCtl.OK()
+	case BACK:
+		return t.inputCtl.Back()
+	case HOME:
+		return t.inputCtl.Home()
+	case CHUP:
+		return t.inputCtl.ChannelUp()
+	case CHDOWN:
+		return t.inputCtl.ChannelDown()
+	case VOLDOWN:
+		return t.inputCtl.VolumeDown()
+	case VOLUP:
+		return t.inputCtl.VolumeUp()
+	case INFO:
+		return t.inputCtl.Info()
+	default:
+		return fmt.Errorf("unknown button: %s", btn)
+	}
 }
 
 func (t *TV) powerOn(ctx context.Context) error {

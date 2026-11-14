@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -22,11 +25,17 @@ const (
 	defaultStorePath  = "store.json"
 	serialBaudRate    = 9600
 	serialReadTimeout = 1 * time.Second
-	irTickInterval    = 100 * time.Millisecond
-	shortPressDelay   = 100 * time.Millisecond
-	longPressDelay    = 500 * time.Millisecond
+	releaseTimeout    = 250 * time.Millisecond
+	longPressDelay    = 400 * time.Millisecond
 	longPressMinCount = 3
+	buttonBufferSize  = 16
+	fndShowDuration   = 1 * time.Second
 )
+
+type irEvent struct {
+	code   uint32
+	repeat bool
+}
 
 type cliOptions struct {
 	port      string
@@ -59,8 +68,8 @@ func main() {
 	}
 	defer ser.Close()
 
-	codeInC := make(chan uint32)
-	buttonC := make(chan button)
+	codeInC := make(chan irEvent, buttonBufferSize)
+	buttonC := make(chan button, buttonBufferSize)
 
 	go detectPresses(rootCtx, codeInC, buttonC)
 	go handleButtons(
@@ -92,58 +101,98 @@ func parseFlags() cliOptions {
 	return opts
 }
 
+type pressState struct {
+	code      uint32
+	count     int
+	startTime time.Time
+	longFired bool
+}
+
+func (p *pressState) onEvent(ev irEvent, now time.Time) (out []button) {
+	if ev.repeat {
+		if p.code == 0 || ev.code != p.code {
+			return nil
+		}
+		p.count++
+		readyForLong := !p.longFired && p.count >= longPressMinCount && now.Sub(p.startTime) >= longPressDelay
+		if readyForLong {
+			p.longFired = true
+			log.Printf("code 0x%x longPress", p.code)
+			return []button{codeToButton(p.code, true)}
+		}
+		return nil
+	}
+
+	if p.code != 0 && !p.longFired {
+		log.Printf("code 0x%x shortPress", p.code)
+		out = append(out, codeToButton(p.code, false))
+	}
+
+	p.code = ev.code
+	p.count = 1
+	p.startTime = now
+	p.longFired = false
+	return out
+}
+
+func (p *pressState) onReleaseTimeout() (button, bool) {
+	if p.code == 0 {
+		return UNKNOWN, false
+	}
+
+	code := p.code
+	longFired := p.longFired
+	*p = pressState{}
+
+	if longFired {
+		return UNKNOWN, false
+	}
+	log.Printf("code 0x%x shortPress", code)
+	return codeToButton(code, false), true
+}
+
 func detectPresses(
 	ctx context.Context,
-	codeC <-chan uint32,
+	codeC <-chan irEvent,
 	buttonC chan<- button,
 ) {
 	defer close(buttonC)
 
-	var repeatedCode uint32
-	var repeatCnt int
-	var downTime time.Time
+	var state pressState
+	releaseTimer := time.NewTimer(releaseTimeout)
+	releaseTimer.Stop()
+	defer releaseTimer.Stop()
 
-	ticker := time.NewTicker(irTickInterval)
-	defer ticker.Stop()
+	emit := func(btn button) bool {
+		select {
+		case buttonC <- btn:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case code := <-codeC:
-			if repeatedCode == code {
-				repeatCnt++
-			} else {
-				repeatedCode = code
-				repeatCnt = 1
-			}
-			downTime = time.Now()
-		case <-ticker.C:
-			if repeatedCode == 0 {
-				continue
-			}
-
-			elapsed := time.Since(downTime)
-			isLongPress := elapsed > longPressDelay && repeatCnt >= longPressMinCount
-			isShortPress := elapsed > shortPressDelay && repeatCnt < longPressMinCount
-			if !isLongPress && !isShortPress {
-				continue
-			}
-
-			if isLongPress {
-				log.Printf("code 0x%x longPress", repeatedCode)
-			} else {
-				log.Printf("code 0x%x shortPress", repeatedCode)
-			}
-
-			btn := codeToButton(repeatedCode, isLongPress)
-			repeatedCode = 0
-			repeatCnt = 0
-
-			select {
-			case buttonC <- btn:
-			case <-ctx.Done():
+		case ev, ok := <-codeC:
+			if !ok {
 				return
+			}
+			for _, btn := range state.onEvent(ev, time.Now()) {
+				if !emit(btn) {
+					return
+				}
+			}
+			if state.code != 0 {
+				releaseTimer.Reset(releaseTimeout)
+			}
+		case <-releaseTimer.C:
+			if btn, ok := state.onReleaseTimeout(); ok {
+				if !emit(btn) {
+					return
+				}
 			}
 		}
 	}
@@ -155,13 +204,17 @@ func handleButtons(
 	fnd *FND,
 	tv *TV,
 ) {
+	var blankGen atomic.Uint64
+
 	for btn := range buttonC {
 		log.Printf("button: %s", btn)
-		go func(label string) {
-			fnd.SetString(label)
-			time.Sleep(1 * time.Second)
-			fnd.SetString(fndBlank)
-		}(btn.String())
+		seq := blankGen.Add(1)
+		fnd.SetString(btn.String())
+		time.AfterFunc(fndShowDuration, func() {
+			if ctx.Err() == nil && blankGen.Load() == seq {
+				fnd.SetString(fndBlank)
+			}
+		})
 
 		if err := tv.Handle(ctx, btn); err != nil {
 			log.Printf("error doing %s: %v", btn, err)
@@ -171,40 +224,48 @@ func handleButtons(
 
 func scanIRCodes(
 	ctx context.Context,
-	ser *serial.Port,
-	codeInC chan<- uint32,
+	ser io.Reader,
+	codeInC chan<- irEvent,
 ) {
+	reader := bufio.NewReader(ser)
 	var lastCode uint32
+	var partial string
 
 	for ctx.Err() == nil {
-		scanner := bufio.NewScanner(ser)
-		for scanner.Scan() {
-			codeStr := strings.TrimSpace(scanner.Text())
-			if codeStr == "" {
-				continue
-			}
-
-			code, isRepeat, err := parseIRCode(codeStr, lastCode)
-			if err != nil {
-				log.Printf("error parsing %q: %v", codeStr, err)
-				continue
-			}
-			if !isRepeat {
-				lastCode = code
-			}
-			if code == 0 {
-				continue
-			}
-
-			select {
-			case codeInC <- code:
-			case <-ctx.Done():
-				return
+		line, err := reader.ReadString('\n')
+		if line != "" {
+			partial += line
+			if strings.HasSuffix(line, "\n") {
+				codeStr := strings.TrimSpace(partial)
+				partial = ""
+				if codeStr != "" {
+					code, isRepeat, parseErr := parseIRCode(codeStr, lastCode)
+					if parseErr != nil {
+						log.Printf("error parsing %q: %v", codeStr, parseErr)
+					} else {
+						if !isRepeat {
+							lastCode = code
+						}
+						if code != 0 {
+							select {
+							case codeInC <- irEvent{code: code, repeat: isRepeat}:
+							case <-ctx.Done():
+								return
+							}
+						}
+					}
+				}
 			}
 		}
 
-		if err := scanner.Err(); err != nil && ctx.Err() == nil {
-			log.Printf("error scanning serial port: %v", err)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				continue
+			}
+			if ctx.Err() == nil {
+				log.Printf("error scanning serial port: %v", err)
+			}
+			return
 		}
 	}
 }

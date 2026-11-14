@@ -3,9 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/suapapa/go_webostv"
 )
 
 func TestBuildMagicPacket(t *testing.T) {
@@ -207,5 +216,169 @@ func TestTVHandleDryRun(t *testing.T) {
 	}
 	if tv.Status != tvStatusOff {
 		t.Fatalf("Status = %v, want tvStatusOff", tv.Status)
+	}
+}
+
+func TestTVLiveReconnectsAfterPointerOrMainClose(t *testing.T) {
+	var (
+		mu             sync.Mutex
+		inputCommands  []string
+		audioOutputs   []string
+		pointerConns   []*websocket.Conn
+		mainConns      []*websocket.Conn
+		pointerSrvHost string
+	)
+
+	pointerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		pointerConns = append(pointerConns, conn)
+		mu.Unlock()
+		defer func() { _ = conn.Close() }()
+
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			inputCommands = append(inputCommands, string(msg))
+			mu.Unlock()
+		}
+	}))
+	defer pointerSrv.Close()
+	pointerSrvHost = "ws://" + strings.TrimPrefix(pointerSrv.URL, "http://") + "/pointer"
+
+	mainSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		mainConns = append(mainConns, conn)
+		mu.Unlock()
+		defer func() { _ = conn.Close() }()
+
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var msg webostv.Message
+			if err := json.Unmarshal(data, &msg); err != nil {
+				return
+			}
+
+			switch msg.Type {
+			case "register":
+				_ = conn.WriteJSON(webostv.Message{
+					Type:    "registered",
+					ID:      msg.ID,
+					Payload: json.RawMessage(`{"client-key":"mock-key"}`),
+				})
+			case "request":
+				switch msg.URI {
+				case "ssap://com.webos.service.networkinput/getPointerInputSocket":
+					_ = conn.WriteJSON(webostv.Message{
+						Type:    "response",
+						ID:      msg.ID,
+						Payload: json.RawMessage(`{"socketPath":"` + pointerSrvHost + `"}`),
+					})
+				case "ssap://audio/changeSoundOutput":
+					var p struct {
+						Output string `json:"output"`
+					}
+					_ = json.Unmarshal(msg.Payload, &p)
+					mu.Lock()
+					audioOutputs = append(audioOutputs, p.Output)
+					mu.Unlock()
+					_ = conn.WriteJSON(webostv.Message{
+						Type:    "response",
+						ID:      msg.ID,
+						Payload: json.RawMessage(`{"returnValue":true}`),
+					})
+				default:
+					_ = conn.WriteJSON(webostv.Message{
+						Type:    "response",
+						ID:      msg.ID,
+						Payload: json.RawMessage(`{"returnValue":true}`),
+					})
+				}
+			}
+		}
+	}))
+	defer mainSrv.Close()
+
+	storePath := filepath.Join(t.TempDir(), "store.json")
+	if err := saveStore(storePath, map[string]string{"client_key": "mock-key"}); err != nil {
+		t.Fatalf("saveStore() err = %v", err)
+	}
+
+	tv := NewTV(strings.TrimPrefix(mainSrv.URL, "http://"), storePath, false)
+	defer tv.Close()
+
+	ctx := context.Background()
+	if err := tv.Handle(ctx, UP); err != nil {
+		t.Fatalf("Handle(UP) err = %v", err)
+	}
+	if err := tv.Handle(ctx, AOUT); err != nil {
+		t.Fatalf("Handle(AOUT) err = %v", err)
+	}
+
+	// Simulate TV closing only the idle pointer socket.
+	mu.Lock()
+	pConn := pointerConns[0]
+	mu.Unlock()
+	_ = pConn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "idle"),
+		time.Now().Add(time.Second),
+	)
+	_ = pConn.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	if err := tv.Handle(ctx, RIGHT); err != nil {
+		t.Fatalf("Handle(RIGHT) after pointer close err = %v", err)
+	}
+
+	// Simulate TV closing the main WebSocket connection too.
+	mu.Lock()
+	mConn := mainConns[0]
+	mu.Unlock()
+	_ = mConn.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	if err := tv.Handle(ctx, LEFT); err != nil {
+		t.Fatalf("Handle(LEFT) after main close err = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(inputCommands)
+		mu.Unlock()
+		if n >= 3 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(inputCommands) != 3 {
+		t.Fatalf("got %d input commands, want 3: %v", len(inputCommands), inputCommands)
+	}
+	if !strings.Contains(inputCommands[0], "name:UP") ||
+		!strings.Contains(inputCommands[1], "name:RIGHT") ||
+		!strings.Contains(inputCommands[2], "name:LEFT") {
+		t.Fatalf("unexpected input commands: %v", inputCommands)
+	}
+	if len(audioOutputs) != 1 || audioOutputs[0] != "tv_speaker" {
+		t.Fatalf("audioOutputs = %v, want [tv_speaker]", audioOutputs)
 	}
 }

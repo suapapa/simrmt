@@ -42,20 +42,20 @@ LG OLED WebOS TV에서 광출력(5.1ch 리시버)과 TV 내장 스피커를 오�
 
 ## 버튼 매핑 (Short / Long Press)
 
-반복 시그널이 3회 미만이고 마지막 수신 후 100ms가 지나면 Short Press, 3회 이상 반복 후 500ms가 지나면 Long Press로 판정합니다 (`mode.go`).
+버튼을 누르고 있는 동안 반복 시그널이 3회 이상 수신되고 첫 입력 후 400ms가 지나면 Long Press로 즉시 판정하며, 그 전에 손을 떼거나 다음 버튼이 입력되면 Short Press로 판정합니다 (`mode.go`).
 
 | IR 코드 | Short Press | Long Press | 동작 |
 | :--- | :--- | :--- | :--- |
 | `0xFB04E786` | `PWRON` | `PWROFF` | Wake-on-LAN + 연결 / TV 전원 끄기 |
 | `0xBC43E786` | `AOUT` | `AOUT` | 사운드 출력 순환 (`tv_speaker` ↔ `external_optical`) |
-| `0xE916E786` | `INPUT` | `INPUT` | 앱/입력 순환 (`현재 방송` → `HDMI1` → `HDMI2`) |
+| `0xE916E786` | `INFO` | `INFO` | 정보 |
 | `0xE817E786` | `UP` | `CHUP` | 위 / 채널 올림 |
 | `0xE41BE786` | `DOWN` | `CHDOWN` | 아래 / 채널 내림 |
 | `0xE51AE786` | `LEFT` | `VOLDOWN` | 왼쪽 / 볼륨 내림 |
 | `0xA659E786` | `RIGHT` | `VOLUP` | 오른쪽 / 볼륨 올림 |
 | `0xBD42E786` | `OK` | `OK` | 확인 |
 | `0xFF00E786` | `BACK` | `BACK` | 뒤로 |
-| `0xF00FE786` | `HOME` | `INFO` | 홈 / 정보 |
+| `0xF00FE786` | `HOME` | `HOME` | 홈 |
 
 ## 빌드 및 실행
 
