@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    (function () {
+      try {
+        var supported = { ko: 1, en: 1, ja: 1, zh: 1 };
+        var pick = null;
+        var q = new URLSearchParams(location.search).get("lang");
+        if (q) {
+          q = String(q).toLowerCase().split("-")[0];
+          if (supported[q]) pick = q;
+        }
+        if (!pick) {
+          var stored = localStorage.getItem("simrmt-lang");
+          if (stored) {
+            stored = String(stored).toLowerCase().split("-")[0];
+            if (supported[stored]) pick = stored;
+          }
+        }
+        if (!pick) {
+          var prefs = navigator.languages || [navigator.language || "ko"];
+          for (var i = 0; i < prefs.length; i++) {
+            var base = String(prefs[i] || "").toLowerCase().split("-")[0];
+            if (supported[base]) {
+              pick = base;
+              break;
+            }
+          }
+        }
+        var lang = pick || "ko";
+        document.documentElement.lang = lang === "zh" ? "zh-CN" : lang;
+      } catch (e) {}
+    })();
+  </script>
+  <title>simrmt - LG WebOS TV 원버튼 IR 리모컨</title>
+  <meta name="description" content="막리모컨과 아두이노, 라즈베리파이로 LG WebOS TV 사운드 출력과 입력을 버튼 한 번에 바꾸는 순수 Go 프로젝트입니다.">
+  <meta name="theme-color" content="#181816">
+  <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f4f5f6;
+      --surface: #e4e6e8;
+      --surface-2: #d4d7da;
+      --ink: #151718;
+      --muted: #4b5056;
+      --slab: #151718;
+      --slab-surface: #202325;
+      --slab-surface-2: #2c3033;
+      --slab-ink: #f4f5f6;
+      --slab-muted: #b3b8be;
+      --accent: #c81e1e;
+      --accent-hover: #9f1818;
+      --accent-ink: #ffffff;
+      --led-glow: #ef4444;
+
+      --fs-display: clamp(2.4rem, 4.8vw, 4.25rem);
+      --fs-heading: clamp(1.75rem, 1.4rem + 1.4vw, 2.5rem);
+      --fs-lead: 1.25rem;
+      --fs-body: 1.0625rem;
+      --fs-small: 0.875rem;
+
+      --font-sans: "Figtree", "Apple SD Gothic Neo", "Noto Sans KR", "Hiragino Sans", "Noto Sans JP", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+      --max: 1180px;
+      --margin: clamp(1.1rem, 3vw, 2.25rem);
+      --section-gap: clamp(4.25rem, 9vw, 8.5rem);
+      --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: var(--fs-body);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    html[lang="ko"] body,
+    html[lang="ko"] h1,
+    html[lang="ko"] h2,
+    html[lang="ko"] h3,
+    html[lang="ko"] p,
+    html[lang="ko"] li,
+    html[lang="ko"] td,
+    html[lang="ko"] th {
+      word-break: keep-all;
+      overflow-wrap: break-word;
+    }
+
+    html[lang="ja"] body,
+    html[lang="zh"] body,
+    html[lang="zh-CN"] body {
+      word-break: normal;
+      line-break: strict;
+      overflow-wrap: break-word;
+    }
+
+    img, svg {
+      display: block;
+      max-width: 100%;
+    }
+
+    img {
+      height: auto;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    button {
+      font: inherit;
+      color: inherit;
+      background: none;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    :focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    [id] {
+      scroll-margin-top: 4.5rem;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      text-wrap: balance;
+    }
+
+    p {
+      margin: 0;
+      text-wrap: pretty;
+    }
+
+    pre, code, kbd, samp {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--fs-small);
+    }
+
+    .hero-grid > *,
+    .story-grid > *,
+    .compare-grid > *,
+    .hw-grid > *,
+    .hw-tables > *,
+    .deploy-stack > *,
+    .demo-grid > * {
+      min-width: 0;
+    }
+
+    .wrap {
+      width: min(100%, var(--max));
+      margin-inline: auto;
+      padding-inline: var(--margin);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.9rem;
+      padding: 0 1.35rem;
+      border-radius: 6px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 140ms var(--ease-out), background-color 180ms ease, color 180ms ease;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    .btn-secondary {
+      background: var(--slab-surface-2);
+      color: var(--slab-ink);
+    }
+
+    .btn-secondary:hover {
+      background: #3d3d37;
+    }
+
+    .btn-light {
+      background: var(--ink);
+      color: var(--bg);
+    }
+
+    .btn-light:hover {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    /* Motion */
+    .reveal {
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity 540ms var(--ease-out), transform 540ms var(--ease-out);
+    }
+
+    .reveal.is-in {
+      opacity: 1;
+      transform: none;
+    }
+
+    .reveal-d1 { transition-delay: 70ms; }
+    .reveal-d2 { transition-delay: 140ms; }
+    .reveal-d3 { transition-delay: 210ms; }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .reveal { opacity: 1; transform: none; transition: none; }
+      .btn, .lang-btn, .video-thumb img { transition: none; }
+    }
+
+    /* Header & Hero */
+    .hero-slab {
+      background: var(--slab);
+      color: var(--slab-ink);
+      padding-bottom: clamp(3.5rem, 7vw, 6rem);
+    }
+
+    .site-nav {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding-block: 1.25rem;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: var(--fs-body);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      text-decoration: none;
+    }
+
+    .brand-dot {
+      width: 0.6rem;
+      height: 0.6rem;
+      border-radius: 999px;
+      background: var(--led-glow);
+    }
+
+    .nav-end {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem 1.5rem;
+    }
+
+    .nav-links {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1.15rem;
+      font-size: var(--fs-small);
+      color: var(--slab-muted);
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      transition: color 160ms ease;
+    }
+
+    .nav-links a:hover {
+      color: var(--slab-ink);
+    }
+
+    .lang-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.25rem;
+      border-radius: 6px;
+      background: var(--slab-surface);
+    }
+
+    .lang-btn {
+      min-height: 2rem;
+      padding: 0 0.6rem;
+      border-radius: 4px;
+      font-size: var(--fs-small);
+      font-weight: 600;
+      color: var(--slab-muted);
+      transition: background-color 160ms ease, color 160ms ease;
+    }
+
+    .lang-btn:hover {
+      color: var(--slab-ink);
+    }
+
+    .lang-btn[aria-pressed="true"] {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: clamp(2.25rem, 4vw, 3.5rem);
+      padding-top: clamp(2rem, 5vw, 4.25rem);
+      align-items: center;
+    }
+
+    .hero-copy {
+      max-width: 52rem;
+    }
+
+    .hero-copy h1 {
+      font-size: var(--fs-display);
+      line-height: 1.12;
+      color: var(--slab-ink);
+    }
+
+    .hero-lead {
+      margin-top: 1.35rem;
+      max-width: 54ch;
+      color: var(--slab-muted);
+      font-size: var(--fs-lead);
+      line-height: 1.55;
+    }
+
+    .hero-actions {
+      margin-top: 1.85rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    /* Sections */
+    .sec {
+      padding-block: var(--section-gap);
+    }
+
+    .sec-tone {
+      background: var(--surface);
+    }
+
+    .sec-head {
+      max-width: 44rem;
+      margin-bottom: clamp(2rem, 4vw, 3.25rem);
+    }
+
+    .sec-head h2 {
+      font-size: var(--fs-heading);
+      line-height: 1.18;
+    }
+
+    .sec-head p {
+      margin-top: 0.95rem;
+      color: var(--muted);
+      max-width: 56ch;
+    }
+
+    /* Story section */
+    .story-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: clamp(2rem, 4vw, 3.5rem);
+      align-items: start;
+    }
+
+    @media (min-width: 900px) {
+      .story-grid {
+        grid-template-columns: 1.05fr 0.95fr;
+      }
+    }
+
+    .story-prose {
+      display: grid;
+      gap: 1.2rem;
+    }
+
+    .story-prose p {
+      max-width: 58ch;
+      color: var(--ink);
+    }
+
+    .story-media {
+      display: grid;
+      gap: 1.5rem;
+    }
+
+    .figure {
+      margin: 0;
+      background: var(--surface);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .figure img {
+      width: 100%;
+    }
+
+    .figure figcaption {
+      padding: 0.85rem 1.05rem;
+      font-size: var(--fs-small);
+      color: var(--muted);
+    }
+
+    /* Architecture Evolution */
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    @media (min-width: 860px) {
+      .compare-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .pipe-panel {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: clamp(1.2rem, 2.5vw, 1.75rem);
+    }
+
+    .pipe-panel.is-current {
+      background: var(--slab);
+      color: var(--slab-ink);
+    }
+
+    .pipe-panel h3 {
+      font-size: var(--fs-lead);
+      line-height: 1.3;
+      margin-bottom: 0.9rem;
+    }
+
+    .pipe-panel p {
+      margin-top: 0.9rem;
+      font-size: var(--fs-small);
+      color: var(--muted);
+    }
+
+    .pipe-panel.is-current p {
+      color: var(--slab-muted);
+    }
+
+    .arch-card {
+      display: grid;
+      grid-template-columns: 1fr;
+      background: var(--bg);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    @media (min-width: 900px) {
+      .arch-card {
+        grid-template-columns: 1.35fr 0.65fr;
+        align-items: center;
+      }
+    }
+
+    .arch-card-media {
+      background: #ffffff;
+    }
+
+    .arch-card-media img {
+      width: 100%;
+    }
+
+    .arch-card-body {
+      padding: clamp(1.35rem, 3vw, 2.25rem);
+      display: grid;
+      gap: 1rem;
+      justify-items: start;
+    }
+
+    .arch-card-body h3 {
+      font-size: var(--fs-lead);
+      line-height: 1.25;
+    }
+
+    .arch-card-body p {
+      color: var(--muted);
+    }
+
+    /* Hardware & Code */
+    .hw-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: clamp(2rem, 4vw, 3rem);
+      align-items: start;
+    }
+
+    @media (min-width: 960px) {
+      .hw-grid {
+        grid-template-columns: 1.15fr 0.85fr;
+      }
+    }
+
+    .hw-tables {
+      display: grid;
+      gap: 2.25rem;
+    }
+
+    .table-block h3,
+    .deploy-block h3 {
+      font-size: var(--fs-lead);
+      line-height: 1.3;
+      margin-bottom: 0.85rem;
+    }
+
+    .table-scroll {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: var(--fs-small);
+      background: var(--surface);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 0.7rem 0.85rem;
+      border-bottom: 1px solid var(--surface-2);
+      vertical-align: top;
+    }
+
+    th {
+      font-weight: 700;
+      background: var(--surface-2);
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .deploy-stack {
+      display: grid;
+      gap: 1.5rem;
+    }
+
+    .deploy-block {
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 1.35rem;
+    }
+
+    .deploy-block p {
+      color: var(--muted);
+      font-size: var(--fs-small);
+      margin-bottom: 0.9rem;
+    }
+
+    pre {
+      margin: 0;
+      padding: 1rem 1.1rem;
+      border-radius: 6px;
+      background: var(--slab);
+      color: var(--slab-ink);
+      overflow-x: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      line-height: 1.5;
+    }
+
+    /* Demo & Repositories */
+    .demo-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: clamp(1.75rem, 3.5vw, 2.75rem);
+      align-items: start;
+    }
+
+    @media (min-width: 900px) {
+      .demo-grid {
+        grid-template-columns: 1.1fr 0.9fr;
+      }
+    }
+
+    .video-card {
+      background: var(--bg);
+      border-radius: 8px;
+      overflow: hidden;
+      display: grid;
+    }
+
+    .video-thumb {
+      position: relative;
+      display: block;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      background: var(--slab);
+    }
+
+    .video-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 360ms var(--ease-out);
+    }
+
+    .video-card:hover .video-thumb img {
+      transform: scale(1.03);
+    }
+
+    .play-mark {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 3.75rem;
+      height: 3.75rem;
+      border-radius: 999px;
+      transform: translate(-50%, -50%);
+      background: var(--accent);
+      color: var(--accent-ink);
+      display: grid;
+      place-items: center;
+    }
+
+    .play-mark svg {
+      width: 1.25rem;
+      height: 1.25rem;
+      margin-left: 0.15rem;
+    }
+
+    .video-body {
+      padding: 1.35rem;
+      display: grid;
+      gap: 0.75rem;
+      justify-items: start;
+    }
+
+    .video-body h3 {
+      font-size: var(--fs-lead);
+    }
+
+    .video-body p {
+      color: var(--muted);
+    }
+
+    .link-stack {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .ext-link {
+      display: grid;
+      gap: 0.25rem;
+      padding: 1.15rem 1.25rem;
+      border-radius: 8px;
+      background: var(--bg);
+      text-decoration: none;
+      transition: transform 150ms var(--ease-out), background-color 160ms ease;
+    }
+
+    .ext-link:hover {
+      background: var(--surface-2);
+      transform: translateX(3px);
+    }
+
+    .ext-link strong {
+      font-size: var(--fs-body);
+      font-weight: 700;
+    }
+
+    .ext-link span {
+      font-size: var(--fs-small);
+      color: var(--muted);
+    }
+
+    /* Footer */
+    .site-footer {
+      background: var(--slab);
+      color: var(--slab-ink);
+      padding-block: clamp(3rem, 6vw, 5rem) 2.5rem;
+    }
+
+    .footer-wordmark {
+      font-size: var(--fs-display);
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 0.95;
+      color: #82878d;
+      margin-bottom: 2.25rem;
+      user-select: none;
+    }
+
+    .footer-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.25rem;
+    }
+
+    .footer-meta {
+      color: var(--slab-muted);
+      font-size: var(--fs-small);
+    }
+  </style>
+  <script src="./i18n.js"></script>
+</head>
+<body>
+  <header class="hero-slab" id="top">
+    <div class="wrap">
+      <nav class="site-nav" data-i18n-aria="navAria" aria-label="주요 탐색">
+        <a class="brand" href="#top">
+          <span class="brand-dot" aria-hidden="true"></span>
+          <span>simrmt</span>
+        </a>
+        <div class="nav-end">
+          <div class="nav-links">
+            <a href="#story" data-i18n="navStory">이야기</a>
+            <a href="#architecture" data-i18n="navArch">구조</a>
+            <a href="#hardware" data-i18n="navHardware">하드웨어</a>
+            <a href="#demo" data-i18n="navDemo">영상</a>
+            <a href="https://github.com/suapapa/simrmt" target="_blank" rel="noopener noreferrer" data-i18n="navGithub">GitHub</a>
+          </div>
+          <div class="lang-switch" role="group" data-i18n-aria="langAria" aria-label="언어 선택">
+            <button type="button" class="lang-btn" data-lang="ko" aria-pressed="true">한국어</button>
+            <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">English</button>
+            <button type="button" class="lang-btn" data-lang="ja" aria-pressed="false">日本語</button>
+            <button type="button" class="lang-btn" data-lang="zh" aria-pressed="false">中文</button>
+          </div>
+        </div>
+      </nav>
+
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <h1 class="reveal is-in" data-i18n-html="heroTitle">사운드 출력 전환,<br>버튼 한 번으로 끝</h1>
+          <p class="hero-lead reveal reveal-d1 is-in" data-i18n="heroLead">
+            LG WebOS TV의 내장 스피커와 광출력(5.1ch 리시버)을 오가려고 매번 설정 메뉴 깊숙이 들어가지 않아도 됩니다. 막리모컨, 아두이노, 라즈베리파이와 순수 Go 단일 바이너리로 만든 원버튼 리모컨입니다.
+          </p>
+          <div class="hero-actions reveal reveal-d2 is-in">
+            <a class="btn btn-primary" href="https://github.com/suapapa/simrmt" target="_blank" rel="noopener noreferrer" data-i18n="heroCtaGithub">GitHub 보기</a>
+            <a class="btn btn-secondary" href="#architecture" data-i18n="heroCtaArch">구조 살펴보기</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="sec" id="story" aria-labelledby="story-title">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <h2 id="story-title" data-i18n-html="storyTitle">설정 메뉴가 답답해서<br>직접 만들었습니다</h2>
+        </div>
+        <div class="story-grid">
+          <div class="story-prose">
+            <p class="reveal" data-i18n="storyP1">
+              LG OLED TV 광출력 단자에 15년 넘은 5.1ch 리시버를 물려두면 내장 OTT 앱 소리가 5.1ch로 깔끔하게 나옵니다. 문제는 TV 스피커와 광출력을 오갈 때마다 설정에서 사운드 메뉴로 깊이 들어가 좌우 키로 고르고 Back으로 닫아야 한다는 점이었습니다.
+            </p>
+            <p class="reveal reveal-d1" data-i18n="storyP2">
+              예전에 Go용 WebOS 패키지가 마땅치 않을 때는 PyWebOSTV로 Python HTTP 서버를 띄우고 Go 프로그램(simremote-ir)이 호출하도록 얽어 두었습니다. 부서진 모니터에서 얻은 막리모컨과 IR 수신기를 아두이노에 붙이고, 라즈베리파이에서 동작하게 만든 게 시작이었습니다.
+            </p>
+            <p class="reveal reveal-d2" data-i18n="storyP3">
+              이번에는 PyWebOSTV를 직접 Go로 옮긴 go_webostv를 써서 Python 서버를 걷어내고 Go 바이너리 하나로 합쳤습니다. webOS25의 TLS(wss://:3001) 연결과 Wake-on-LAN까지 한 번에 처리합니다.
+            </p>
+          </div>
+          <div class="story-media">
+            <figure class="figure reveal reveal-d1">
+              <img src="./assets/simremote_concept_800.webp" width="800" height="868" loading="lazy" data-i18n-alt="storyCapSketch" alt="2023년 처음 떠올렸던 컨셉 스케치">
+              <figcaption data-i18n="storyCapSketch">2023년 처음 떠올렸던 컨셉 스케치</figcaption>
+            </figure>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec sec-tone" id="architecture" aria-labelledby="arch-title">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <h2 id="arch-title" data-i18n-html="archTitle">Python 브리지를 걷어낸<br>단일 Go 구조</h2>
+          <p data-i18n="archLead">두 프로세스로 나뉘어 HTTP를 타던 예전 구조를 단일 Go 바이너리와 직접 WebSocket/TLS 연결로 줄였습니다.</p>
+        </div>
+
+        <div class="compare-grid">
+          <article class="pipe-panel is-current reveal">
+            <h3 data-i18n="archCurrentTitle">현재 구조 (simrmt + go_webostv)</h3>
+            <svg viewBox="0 0 600 96" role="img" aria-label="Arduino -> simrmt (Go + go_webostv) -> WS/WSS + WoL -> LG WebOS TV">
+              <rect x="4" y="18" width="118" height="58" rx="6" fill="#202325"/>
+              <text x="63" y="44" text-anchor="middle" fill="#f4f5f6" font-size="13" font-weight="700">Arduino</text>
+              <text x="63" y="62" text-anchor="middle" fill="#b3b8be" font-size="11">IR 9600 baud</text>
+              <line x1="122" y1="47" x2="162" y2="47" stroke="#ef4444" stroke-width="2.5"/>
+              <polygon points="162,42 172,47 162,52" fill="#ef4444"/>
+
+              <rect x="172" y="14" width="234" height="66" rx="6" fill="#c81e1e"/>
+              <text x="289" y="43" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="700">simrmt (Go)</text>
+              <text x="289" y="63" text-anchor="middle" fill="#ffffff" font-size="11">go_webostv · TM1638 · WoL</text>
+              <line x1="406" y1="47" x2="446" y2="47" stroke="#ef4444" stroke-width="2.5"/>
+              <polygon points="446,42 456,47 446,52" fill="#ef4444"/>
+
+              <rect x="456" y="18" width="140" height="58" rx="6" fill="#202325"/>
+              <text x="526" y="44" text-anchor="middle" fill="#f4f5f6" font-size="13" font-weight="700">LG WebOS TV</text>
+              <text x="526" y="62" text-anchor="middle" fill="#b3b8be" font-size="11">WS :3000 / WSS :3001</text>
+            </svg>
+            <p data-i18n="archCurrentNote">아두이노 시리얼 수신부터 SSDP 검색, WoL, WebOS 제어, FND 출력까지 한 바이너리에서 끝납니다.</p>
+          </article>
+
+          <article class="pipe-panel reveal reveal-d1">
+            <h3 data-i18n="archLegacyTitle">기존 구조 (simremote-ir + simremote)</h3>
+            <svg viewBox="0 0 600 96" role="img" aria-label="Arduino -> simremote-ir (Go) -> HTTP -> simremote (Python) -> LG WebOS TV">
+              <rect x="4" y="18" width="96" height="58" rx="6" fill="#e4e6e8"/>
+              <text x="52" y="44" text-anchor="middle" fill="#151718" font-size="13" font-weight="700">Arduino</text>
+              <text x="52" y="62" text-anchor="middle" fill="#4b5056" font-size="11">IR 9600</text>
+              <line x1="100" y1="47" x2="128" y2="47" stroke="#4b5056" stroke-width="2"/>
+              <polygon points="128,42 138,47 128,52" fill="#4b5056"/>
+
+              <rect x="138" y="18" width="126" height="58" rx="6" fill="#e4e6e8"/>
+              <text x="201" y="44" text-anchor="middle" fill="#151718" font-size="13" font-weight="700">simremote-ir</text>
+              <text x="201" y="62" text-anchor="middle" fill="#4b5056" font-size="11">Go serial</text>
+              <line x1="264" y1="47" x2="294" y2="47" stroke="#4b5056" stroke-width="2" stroke-dasharray="4 3"/>
+              <polygon points="294,42 304,47 294,52" fill="#4b5056"/>
+
+              <rect x="304" y="18" width="144" height="58" rx="6" fill="#d4d7da"/>
+              <text x="376" y="44" text-anchor="middle" fill="#151718" font-size="13" font-weight="700">simremote</text>
+              <text x="376" y="62" text-anchor="middle" fill="#4b5056" font-size="11">Python Flask</text>
+              <line x1="448" y1="47" x2="478" y2="47" stroke="#4b5056" stroke-width="2"/>
+              <polygon points="478,42 488,47 478,52" fill="#4b5056"/>
+
+              <rect x="488" y="18" width="108" height="58" rx="6" fill="#e4e6e8"/>
+              <text x="542" y="44" text-anchor="middle" fill="#151718" font-size="13" font-weight="700">LG TV</text>
+              <text x="542" y="62" text-anchor="middle" fill="#4b5056" font-size="11">WS :3000</text>
+            </svg>
+            <p data-i18n="archLegacyNote">시리얼 파싱용 Go 프로세스와 PyWebOSTV용 Python Flask 서버 두 개를 함께 띄워야 했습니다.</p>
+          </article>
+        </div>
+
+        <article class="arch-card reveal reveal-d2">
+          <div class="arch-card-media">
+            <img src="./assets/architecture-preview.png" width="1440" height="960" loading="lazy" data-i18n-alt="archPreviewAlt" alt="simrmt 아키텍처 다이어그램 미리보기">
+          </div>
+          <div class="arch-card-body">
+            <h3 data-i18n="archInteractiveTitle">전체 코드 기반 아키텍처 보기</h3>
+            <p data-i18n="archInteractiveBody">
+              main.go, tv.go, fnd.go, wol.go의 실제 호출 흐름과 소스 위치를 대화형 다이어그램으로 열어 볼 수 있습니다.
+            </p>
+            <a class="btn btn-light" href="./architecture.html" data-i18n="archInteractiveCta">대화형 아키텍처 열기</a>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="sec" id="hardware" aria-labelledby="hw-title">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <h2 id="hw-title" data-i18n-html="hwTitle">하드웨어 배선과<br>버튼 매핑</h2>
+          <p data-i18n="hwLead">
+            아두이노가 NEC IR 코드를 읽어 USB 시리얼로 넘기면, 라즈베리파이의 simrmt가 짧게·길게 누름을 판정해 TM1638 FND와 TV로 보냅니다.
+          </p>
+        </div>
+
+        <div class="hw-grid">
+          <div class="hw-tables">
+            <div class="table-block reveal">
+              <h3 data-i18n="pinTableTitle">핀 연결</h3>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th data-i18n="colDevice">장치</th>
+                      <th data-i18n="colSignal">역할 / 핀</th>
+                      <th data-i18n="colTarget">연결 대상</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td data-i18n="pinArduino">Arduino + IR 수신기</td>
+                      <td><code data-i18n="pinArduinoSig">IR_RECEIVE_PIN 2 · 9600 baud</code></td>
+                      <td data-i18n="pinArduinoDst">USB 시리얼 (/dev/ttyUSB0)</td>
+                    </tr>
+                    <tr>
+                      <td data-i18n="pinFndData">TM1638 FND (DATA)</td>
+                      <td><code data-i18n="pinFndDataSig">GPIO 17 (BCM)</code></td>
+                      <td data-i18n="pinFndDst">라즈베리파이 GPIO (periph.io)</td>
+                    </tr>
+                    <tr>
+                      <td data-i18n="pinFndClk">TM1638 FND (CLK)</td>
+                      <td><code data-i18n="pinFndClkSig">GPIO 27 (BCM)</code></td>
+                      <td data-i18n="pinFndDst">라즈베리파이 GPIO (periph.io)</td>
+                    </tr>
+                    <tr>
+                      <td data-i18n="pinFndStb">TM1638 FND (STB)</td>
+                      <td><code data-i18n="pinFndStbSig">GPIO 22 (BCM)</code></td>
+                      <td data-i18n="pinFndDst">라즈베리파이 GPIO (periph.io)</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="table-block reveal reveal-d1">
+              <h3 data-i18n="btnTableTitle">IR 코드별 동작</h3>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th data-i18n="colHex">IR 코드</th>
+                      <th data-i18n="colShort">짧게 누르기</th>
+                      <th data-i18n="colLong">길게 누르기</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td><code>0xFB04E786</code></td><td><code>PWRON</code></td><td><code>PWROFF</code></td></tr>
+                    <tr><td><code>0xBC43E786</code></td><td><code>AOUT</code></td><td><code>AOUT</code></td></tr>
+                    <tr><td><code>0xE916E786</code></td><td><code>INFO</code></td><td><code>INFO</code></td></tr>
+                    <tr><td><code>0xE817E786</code></td><td><code>UP</code></td><td><code>CHUP</code></td></tr>
+                    <tr><td><code>0xE41BE786</code></td><td><code>DOWN</code></td><td><code>CHDOWN</code></td></tr>
+                    <tr><td><code>0xE51AE786</code></td><td><code>LEFT</code></td><td><code>VOLDOWN</code></td></tr>
+                    <tr><td><code>0xA659E786</code></td><td><code>RIGHT</code></td><td><code>VOLUP</code></td></tr>
+                    <tr><td><code>0xBD42E786</code></td><td><code>OK</code></td><td><code>OK</code></td></tr>
+                    <tr><td><code>0xFF00E786</code></td><td><code>BACK</code></td><td><code>BACK</code></td></tr>
+                    <tr><td><code>0xF00FE786</code></td><td><code>HOME</code></td><td><code>HOME</code></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="deploy-stack">
+            <div class="deploy-block reveal reveal-d1">
+              <h3 data-i18n="deployTitle">크로스 빌드와 systemd 서비스 설치</h3>
+              <p data-i18n="deployBody">
+                라즈베리파이 1 B+(ARMv6)부터 64비트 보드까지 스크립트 한 줄로 크로스 컴파일하고 systemd 서비스로 등록합니다.
+              </p>
+              <pre><code>./build_and_install_systemservice_arm32.sh admin@ir.local
+./build_and_install_systemservice_arm64.sh pi@ir.local</code></pre>
+            </div>
+
+            <div class="deploy-block reveal reveal-d2">
+              <h3 data-i18n="cliTitle">실행 플래그</h3>
+              <p data-i18n="cliBody">
+                -port(기본 /dev/ttyUSB0), -tv(미지정 시 SSDP 자동 검색), -store(호스트·MAC·client_key·TLS 여부 저장), -n(드라이런)
+              </p>
+              <pre><code>simrmt -port /dev/ttyUSB0 -store /var/lib/simrmt/store.json</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec sec-tone" id="demo" aria-labelledby="demo-title">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <h2 id="demo-title" data-i18n="demoTitle">실제 TV에서 동작하는 모습</h2>
+          <p data-i18n="demoLead">
+            막리모컨 버튼 한 번으로 TV 내장 스피커와 5.1ch 광출력 리시버를 오가는 시연 영상과 관련 저장소입니다.
+          </p>
+        </div>
+
+        <div class="demo-grid">
+          <article class="video-card reveal">
+            <a class="video-thumb" href="https://youtu.be/PAP6LEYnH0Y" target="_blank" rel="noopener noreferrer">
+              <img src="./assets/youtube-demo.jpg" width="480" height="360" loading="lazy" data-i18n-alt="demoVideoAlt" alt="simrmt LG WebOS TV 동작 시연 영상 썸네일">
+              <span class="play-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              </span>
+            </a>
+            <div class="video-body">
+              <h3 data-i18n="demoCardTitle">원버튼 사운드 전환 시연</h3>
+              <p data-i18n="demoCardBody">
+                원래 블로그 글에 올렸던 실제 거실 테스트 영상입니다. 2023년 개념 그대로 단일 Go 바이너리로 이어졌습니다.
+              </p>
+              <a class="btn btn-primary" href="https://youtu.be/PAP6LEYnH0Y" target="_blank" rel="noopener noreferrer" data-i18n="demoWatchCta">YouTube에서 영상 보기</a>
+            </div>
+          </article>
+
+          <div class="link-stack">
+            <a class="ext-link reveal" href="https://homin.dev/blog/post/20230228_simremote4lg-webos-tv/" target="_blank" rel="noopener noreferrer">
+              <strong data-i18n="linkBlog">블로그 원문</strong>
+              <span data-i18n="linkBlogDesc">LG TV 사운드 출력 변환 한 버튼으로 하기</span>
+            </a>
+            <a class="ext-link reveal reveal-d1" href="https://github.com/suapapa/simrmt" target="_blank" rel="noopener noreferrer">
+              <strong>suapapa/simrmt</strong>
+              <span data-i18n="linkRepoDesc">단일 Go 바이너리 &amp; systemd 배포 스크립트</span>
+            </a>
+            <a class="ext-link reveal reveal-d2" href="https://github.com/suapapa/go_webostv" target="_blank" rel="noopener noreferrer">
+              <strong>suapapa/go_webostv</strong>
+              <span data-i18n="linkWebosDesc">PyWebOSTV를 포팅한 순수 Go WebOS 클라이언트</span>
+            </a>
+            <a class="ext-link reveal reveal-d3" href="https://github.com/suapapa/go_devices" target="_blank" rel="noopener noreferrer">
+              <strong>suapapa/go_devices</strong>
+              <span data-i18n="linkDevDesc">TM1638 8자리 FND 제어 패키지</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="footer-wordmark" aria-hidden="true">simrmt</div>
+      <div class="footer-row">
+        <p class="footer-meta" data-i18n="footerCopy">Homin Lee &lt;i@homin.dev&gt; · MIT License</p>
+        <a class="btn btn-secondary" href="#top" data-i18n="footerBackTop">맨 위로</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var i18n = window.SIMRMT_I18N;
+      if (!i18n) return;
+
+      var currentLang = i18n.detect();
+      var metaDesc = document.querySelector('meta[name="description"]');
+
+      function applyLang(lang, persist) {
+        currentLang = i18n.normalize(lang) || "ko";
+        var pack = i18n.t(currentLang);
+        document.documentElement.lang = currentLang === "zh" ? "zh-CN" : currentLang;
+        document.title = pack.docTitle;
+        if (metaDesc) metaDesc.setAttribute("content", pack.metaDescription);
+
+        document.querySelectorAll("[data-i18n]").forEach(function (el) {
+          var key = el.getAttribute("data-i18n");
+          if (pack[key] != null) el.textContent = pack[key];
+        });
+        document.querySelectorAll("[data-i18n-html]").forEach(function (el) {
+          var key = el.getAttribute("data-i18n-html");
+          if (pack[key] != null) el.innerHTML = pack[key];
+        });
+        document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
+          var key = el.getAttribute("data-i18n-aria");
+          if (pack[key] != null) el.setAttribute("aria-label", pack[key]);
+        });
+        document.querySelectorAll("[data-i18n-alt]").forEach(function (el) {
+          var key = el.getAttribute("data-i18n-alt");
+          if (pack[key] != null) el.setAttribute("alt", pack[key]);
+        });
+
+        document.querySelectorAll(".lang-switch [data-lang]").forEach(function (btn) {
+          btn.setAttribute("aria-pressed", String(btn.getAttribute("data-lang") === currentLang));
+        });
+
+        if (persist) {
+          try { window.localStorage.setItem(i18n.STORAGE_KEY, currentLang); } catch (e) {}
+          try {
+            var url = new URL(window.location.href);
+            url.searchParams.set("lang", currentLang);
+            window.history.replaceState(null, "", url);
+          } catch (e) {}
+        }
+      }
+
+      document.querySelectorAll(".lang-switch [data-lang]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          applyLang(btn.getAttribute("data-lang"), true);
+        });
+      });
+
+      applyLang(currentLang, false);
+
+      if ("IntersectionObserver" in window) {
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) {
+              entry.target.classList.add("is-in");
+              io.unobserve(entry.target);
+            }
+          });
+        }, { threshold: 0.08, rootMargin: "0px 0px -4% 0px" });
+        document.querySelectorAll(".reveal:not(.is-in)").forEach(function (el) {
+          io.observe(el);
+        });
+      } else {
+        document.querySelectorAll(".reveal").forEach(function (el) {
+          el.classList.add("is-in");
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
