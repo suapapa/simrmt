@@ -10,8 +10,8 @@ github.com/koron/go-ssdp v0.9.1/go.mod h1:C43c047jWkDaeg9YuZlSh/QGqOieuWV6dbhWi/
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/suapapa/go_devices v1.1.1 h1:w/UOOug4ms2V+Z452Bpx3DcJ29mQ+78WcKrLK3NOERg=
 github.com/suapapa/go_devices v1.1.1/go.mod h1:WEJu3ZEqxU4QnNVCtfMs9fOZtKrlpi4eM7A0oYTWEK8=
-github.com/suapapa/go_webostv v0.1.2 h1:5Py+LD8Fo+YwCyj4M5giowvAtsIcarjcidTUEvV/ACw=
-github.com/suapapa/go_webostv v0.1.2/go.mod h1:9skpy6ZwE47yjv9qI+JtyZGkw2a99WRwjbDLtBJFe0E=
+github.com/suapapa/go_webostv v0.1.3 h1:R58KPAXE8dFDMjB03MiP9zlzZRl+1K9kfap4F6M0Biw=
+github.com/suapapa/go_webostv v0.1.3/go.mod h1:9skpy6ZwE47yjv9qI+JtyZGkw2a99WRwjbDLtBJFe0E=
 github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07 h1:UyzmZLoiDWMRywV4DUYb9Fbt8uiOSooupjTq10vpvnU=
 github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07/go.mod h1:kDXzergiv9cbyO7IOYJZWg1U88JhDg3PB6klq9Hg2pA=
 golang.org/x/net v0.58.0 h1:ynWG7rqYi4ccpTEuPZ2QGWHktVEM9DMCj9yzDE0Q7To=

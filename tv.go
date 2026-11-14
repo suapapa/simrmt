@@ -174,10 +174,6 @@ func (t *TV) connect(ctx context.Context) error {
 	}
 
 	inputCtl := &webostv.InputControl{Control: webostv.Control{Client: client}}
-	if err := inputCtl.ConnectInput(ctx); err != nil {
-		_ = client.Close()
-		return fmt.Errorf("connect input socket: %w", err)
-	}
 
 	t.client = client
 	t.mediaCtl = &webostv.MediaControl{Control: webostv.Control{Client: client}}
@@ -312,6 +308,9 @@ func (t *TV) disconnect() {
 func (t *TV) keyHandler(ctx context.Context, btn button) error {
 	if err := t.connect(ctx); err != nil {
 		return err
+	}
+	if err := t.inputCtl.ConnectInput(ctx); err != nil {
+		return fmt.Errorf("connect input socket: %w", err)
 	}
 
 	var err error
