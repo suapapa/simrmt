@@ -152,8 +152,8 @@ func (t *TV) connect(ctx context.Context) error {
 	host := t.store["host"]
 	log.Printf("connecting to TV at %s...", host)
 
-	client := webostv.NewClient(host)
-	if err := client.Connect(); err != nil {
+	client, err := t.dialTV(host)
+	if err != nil {
 		return fmt.Errorf("connect TV %s: %w", host, err)
 	}
 
@@ -189,6 +189,33 @@ func (t *TV) connect(ctx context.Context) error {
 	t.connected = true
 	t.Status = tvStatusOn
 	return nil
+}
+
+func (t *TV) dialTV(host string) (*webostv.Client, error) {
+	if t.store["secure"] == "true" {
+		client := webostv.NewClient(host, webostv.WithSecure(true))
+		if err := client.Connect(); err != nil {
+			return nil, err
+		}
+		return client, nil
+	}
+
+	client := webostv.NewClient(host)
+	err := client.Connect()
+	if err == nil {
+		return client, nil
+	}
+
+	log.Printf("insecure connect to %s failed (%v), retrying with TLS...", host, err)
+	secureClient := webostv.NewClient(host, webostv.WithSecure(true))
+	if secureErr := secureClient.Connect(); secureErr != nil {
+		return nil, err
+	}
+	t.store["secure"] = "true"
+	if saveErr := saveStore(t.storePath, t.store); saveErr != nil {
+		log.Printf("warning: failed to save secure flag to store: %v", saveErr)
+	}
+	return secureClient, nil
 }
 
 func (t *TV) ensureHost(ctx context.Context) error {

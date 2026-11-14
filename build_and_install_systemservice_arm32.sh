@@ -19,10 +19,10 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 BIN_PATH="${TMP_DIR}/${SERVICE_NAME}"
 SERVICE_PATH="${TMP_DIR}/${SERVICE_NAME}.service"
 
-echo "[1/4] Building ${SERVICE_NAME} for linux/arm (32-bit)..."
+echo "[1/4] Building ${SERVICE_NAME} for linux/arm (GOARM=6, 32-bit)..."
 (
     cd "${SCRIPT_DIR}"
-    GOOS=linux GOARCH=arm go build -o "${BIN_PATH}" .
+    GOOS=linux GOARCH=arm GOARM=6 go build -o "${BIN_PATH}" .
 )
 
 cat > "${SERVICE_PATH}" <<EOF

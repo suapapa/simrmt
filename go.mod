@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/suapapa/go_devices v1.1.1
-	github.com/suapapa/go_webostv v0.1.1
+	github.com/suapapa/go_webostv v0.1.2
 	github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07
 	periph.io/x/conn/v3 v3.7.3
 	periph.io/x/host/v3 v3.8.5
